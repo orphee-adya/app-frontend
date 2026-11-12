@@ -1,0 +1,52 @@
+# app-frontend/.github/workflows/ci-cd.yml
+name: CI/CD
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  validate:
+    uses: mon-org/platform-pipelines/.github/workflows/pr-validation.yml@v2.4.0
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: mon-org/platform-pipelines/actions/security-scan-bundle@v2.4.0
+
+  build:
+    needs: [validate, security-scan]
+    uses: mon-org/platform-pipelines/.github/workflows/build-scan-push-container.yml@v2.4.0
+    with:
+      image_name: app-frontend
+      acr_name: monacr
+    secrets: inherit
+
+  deploy-staging:
+    needs: build
+    uses: mon-org/platform-pipelines/.github/workflows/deploy-aks.yml@v2.4.0
+    with:
+      environment: staging
+      aks_cluster_name: aks-staging
+      resource_group: rg-staging
+      namespace: app-frontend
+      image_digest: ${{ needs.build.outputs.image_digest }}
+    secrets: inherit
+
+  deploy-production:
+    needs: [build, deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    uses: mon-org/platform-pipelines/.github/workflows/deploy-aks.yml@v2.4.0
+    with:
+      environment: production
+      aks_cluster_name: aks-production
+      resource_group: rg-production
+      namespace: app-frontend
+      image_digest: ${{ needs.build.outputs.image_digest }}
+    secrets: inherit
+
+  release:
+    needs: deploy-production
+    uses: mon-org/platform-pipelines/.github/workflows/release-semver.yml@v2.4.0
